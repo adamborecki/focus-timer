@@ -9,16 +9,6 @@ Single-page Pomodoro web app with:
 - Manual transition button into break
 - Musical break cues with ocean-like ambient noise and harmonic return swell
 
-## Run locally
+## Check it out
 
-Because this is static, you can serve it with any web server:
-
-```bash
-python -m http.server 8080
-```
-
-Then open `http://localhost:8080`.
-
-## Deploy to GitHub Pages
-
-Push this repository and enable GitHub Pages for the branch/folder that contains `index.html`.
+- http://adamborecki.github.io/focus-timer
