@@ -19,7 +19,7 @@
     <main class="app-shell">
       <header class="hero panel">
         <p class="eyebrow">Binaural Pomodoro Studio</p>
-        <h1>Deep Focus Orbit</h1>
+        <h1>focus-timer</h1>
         <p class="hero-subtitle">
           A musical focus timer with masked binaural beats, slow-evolving cues, and gentle break transitions.
         </p>
@@ -55,9 +55,11 @@
       </section>
 
       <section class="actions panel">
+        <button id="enableAudioBtn" class="btn btn-primary">Tap To Enable Audio</button>
         <button id="startFocusBtn" class="btn btn-primary">Start Focus</button>
         <button id="startBreakBtn" class="btn btn-primary" hidden>Start Break</button>
         <button id="startNextFocusBtn" class="btn btn-primary" hidden>Start Next Focus</button>
+        <button id="transitionEarlyBtn" class="btn btn-ghost" hidden>Transition To End Cue</button>
         <button id="resetBtn" class="btn btn-ghost">Reset</button>
       </section>
 
@@ -66,6 +68,64 @@
         <p id="profileHz" class="profile-hz"></p>
         <p id="profileDescription" class="profile-description"></p>
       </section>
+
+      <section class="mixer panel">
+        <details>
+          <summary>Mixer & Advanced</summary>
+
+          <div class="mixer-grid">
+            <label class="slider-field" for="masterSlider">
+              <span class="slider-label">Master</span>
+              <input id="masterSlider" type="range" min="0" max="100" value="86" />
+              <span id="masterValue" class="slider-value">86%</span>
+            </label>
+
+            <label class="slider-field" for="focusSlider">
+              <span class="slider-label">Focus Master</span>
+              <input id="focusSlider" type="range" min="0" max="100" value="100" />
+              <span id="focusValue" class="slider-value">100%</span>
+            </label>
+
+            <label class="slider-field" for="binauralSlider">
+              <span class="slider-label">Binaural</span>
+              <input id="binauralSlider" type="range" min="0" max="100" value="100" />
+              <span id="binauralValue" class="slider-value">100%</span>
+            </label>
+
+            <label class="slider-field" for="padsSlider">
+              <span class="slider-label">Pads</span>
+              <input id="padsSlider" type="range" min="0" max="100" value="100" />
+              <span id="padsValue" class="slider-value">100%</span>
+            </label>
+
+            <label class="slider-field" for="alarmSlider">
+              <span class="slider-label">End Noise Cue</span>
+              <input id="alarmSlider" type="range" min="0" max="100" value="100" />
+              <span id="alarmValue" class="slider-value">100%</span>
+            </label>
+
+            <label class="slider-field" for="breakAmbientSlider">
+              <span class="slider-label">Break Atmosphere</span>
+              <input id="breakAmbientSlider" type="range" min="0" max="100" value="100" />
+              <span id="breakAmbientValue" class="slider-value">100%</span>
+            </label>
+
+            <label class="slider-field" for="cueSlider">
+              <span class="slider-label">Harmonic Cues</span>
+              <input id="cueSlider" type="range" min="0" max="100" value="100" />
+              <span id="cueValue" class="slider-value">100%</span>
+            </label>
+          </div>
+
+          <p class="advanced-note">
+            Use Transition To End Cue during focus or break if you want to move into the final transition sooner.
+          </p>
+        </details>
+      </section>
+
+      <footer class="app-footer">
+        <small id="appVersion">v1.1.0</small>
+      </footer>
     </main>
 
     <script src="app.js"></script>

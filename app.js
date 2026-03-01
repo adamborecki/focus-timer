@@ -1,3 +1,4 @@
+const APP_VERSION = "v1.1.0";
 const FOCUS_SECONDS = 25 * 60;
 const BREAK_SECONDS = 4 * 60;
 const FOCUS_ALARM_FADE_SECONDS = 20;
@@ -40,11 +41,25 @@ class SoundEngine {
     this.ctx = null;
     this.master = null;
     this.masterTone = null;
+    this.mixNodes = null;
+    this.levels = {
+      master: 0.86,
+      focus: 1,
+      binaural: 1,
+      pads: 1,
+      alarm: 1,
+      breakAmbient: 1,
+      cue: 1,
+    };
     this.brownNoiseBuffer = null;
     this.focusLayer = null;
     this.focusAlarmLayer = null;
     this.breakAmbientLayer = null;
     this.breakReturnCueLayer = null;
+  }
+
+  clamp01(value) {
+    return Math.min(1, Math.max(0, value));
   }
 
   async ensureContext() {
@@ -59,13 +74,63 @@ class SoundEngine {
       this.masterTone.type = "lowpass";
       this.masterTone.frequency.value = 13500;
       this.masterTone.Q.value = 0.2;
-      this.master.gain.value = 0.86;
+      this.master.gain.value = this.levels.master;
+
+      this.mixNodes = {
+        focus: this.ctx.createGain(),
+        alarm: this.ctx.createGain(),
+        breakAmbient: this.ctx.createGain(),
+        cue: this.ctx.createGain(),
+      };
+
+      this.mixNodes.focus.gain.value = this.levels.focus;
+      this.mixNodes.alarm.gain.value = this.levels.alarm;
+      this.mixNodes.breakAmbient.gain.value = this.levels.breakAmbient;
+      this.mixNodes.cue.gain.value = this.levels.cue;
+
+      this.mixNodes.focus.connect(this.master);
+      this.mixNodes.alarm.connect(this.master);
+      this.mixNodes.breakAmbient.connect(this.master);
+      this.mixNodes.cue.connect(this.master);
+
       this.master.connect(this.masterTone);
       this.masterTone.connect(this.ctx.destination);
     }
     if (this.ctx.state === "suspended") {
       await this.ctx.resume();
     }
+  }
+
+  setMasterLevel(level) {
+    this.levels.master = this.clamp01(level);
+    if (this.ctx && this.master) {
+      this.master.gain.setTargetAtTime(this.levels.master, this.ctx.currentTime, 0.08);
+    }
+  }
+
+  setMixLevel(name, level) {
+    const clamped = this.clamp01(level);
+    if (!(name in this.levels)) {
+      return;
+    }
+    this.levels[name] = clamped;
+    if (this.ctx && this.mixNodes?.[name]) {
+      this.mixNodes[name].gain.setTargetAtTime(clamped, this.ctx.currentTime, 0.08);
+    }
+    if (this.ctx && name === "binaural" && this.focusLayer?.binauralGroupGain) {
+      this.focusLayer.binauralGroupGain.gain.setTargetAtTime(clamped, this.ctx.currentTime, 0.08);
+    }
+    if (this.ctx && name === "pads" && this.focusLayer?.padsGroupGain) {
+      this.focusLayer.padsGroupGain.gain.setTargetAtTime(clamped, this.ctx.currentTime, 0.08);
+    }
+  }
+
+  connectLayerBus(bus, mixName) {
+    if (this.mixNodes?.[mixName]) {
+      bus.connect(this.mixNodes[mixName]);
+      return;
+    }
+    bus.connect(this.master);
   }
 
   buildBrownNoiseBuffer(durationSeconds = 4) {
@@ -170,11 +235,6 @@ class SoundEngine {
     this.focusAlarmLayer = this.buildFocusAlarmLayer();
   }
 
-  stopFocusAlarm(fadeSeconds = 2.5) {
-    this.stopLayer(this.focusAlarmLayer, fadeSeconds);
-    this.focusAlarmLayer = null;
-  }
-
   async startBreak(profile) {
     await this.ensureContext();
     this.stopLayer(this.focusLayer, 2.6);
@@ -202,13 +262,6 @@ class SoundEngine {
     this.breakReturnCueLayer = this.buildBreakReturnCueLayer(profile, rampSeconds);
   }
 
-  stopBreakLayers(fadeSeconds = 2) {
-    this.stopLayer(this.breakAmbientLayer, fadeSeconds);
-    this.stopLayer(this.breakReturnCueLayer, fadeSeconds);
-    this.breakAmbientLayer = null;
-    this.breakReturnCueLayer = null;
-  }
-
   stopAll(fadeSeconds = 2) {
     this.stopLayer(this.focusLayer, fadeSeconds);
     this.stopLayer(this.focusAlarmLayer, fadeSeconds);
@@ -224,6 +277,10 @@ class SoundEngine {
     const now = this.ctx.currentTime;
     const bus = this.ctx.createGain();
     bus.gain.value = 0;
+    const binauralGroupGain = this.ctx.createGain();
+    const padsGroupGain = this.ctx.createGain();
+    binauralGroupGain.gain.value = this.levels.binaural;
+    padsGroupGain.gain.value = this.levels.pads;
 
     const padFilter = this.ctx.createBiquadFilter();
     padFilter.type = "lowpass";
@@ -247,7 +304,7 @@ class SoundEngine {
     shimmerDepth.connect(bus.gain);
 
     padFilter.connect(bus);
-    bus.connect(this.master);
+    this.connectLayerBus(bus, "focus");
 
     const carrier = profile.carrierHz;
     const beat = profile.beatHz;
@@ -271,8 +328,9 @@ class SoundEngine {
     rightOsc.connect(rightGain);
     leftGain.connect(leftPan);
     rightGain.connect(rightPan);
-    leftPan.connect(padFilter);
-    rightPan.connect(padFilter);
+    leftPan.connect(binauralGroupGain);
+    rightPan.connect(binauralGroupGain);
+    binauralGroupGain.connect(padFilter);
 
     const padRatios = [1, 1.25, 1.5, 2];
     const padTypes = ["triangle", "sawtooth", "triangle", "triangle"];
@@ -287,10 +345,11 @@ class SoundEngine {
       osc.detune.value = (index - 1.5) * 5.4;
       gain.gain.value = 0.034 / (1 + index * 0.3);
       osc.connect(gain);
-      gain.connect(padFilter);
+      gain.connect(padsGroupGain);
       padOscs.push(osc);
       padGains.push(gain);
     });
+    padsGroupGain.connect(padFilter);
 
     bus.gain.setValueAtTime(0, now);
     bus.gain.linearRampToValueAtTime(0.29, now + 6);
@@ -303,9 +362,13 @@ class SoundEngine {
 
     return {
       gainNode: bus,
+      binauralGroupGain,
+      padsGroupGain,
       oscillators: [padFilterLfo, shimmerLfo, leftOsc, rightOsc, ...padOscs],
       nodes: [
         bus,
+        binauralGroupGain,
+        padsGroupGain,
         padFilter,
         padFilterDepth,
         shimmerDepth,
@@ -343,7 +406,7 @@ class SoundEngine {
     source.connect(highpass);
     highpass.connect(lowpass);
     lowpass.connect(bus);
-    bus.connect(this.master);
+    this.connectLayerBus(bus, "alarm");
 
     bus.gain.setValueAtTime(0, now);
     bus.gain.linearRampToValueAtTime(0.19, now + FOCUS_ALARM_FADE_SECONDS);
@@ -390,7 +453,7 @@ class SoundEngine {
     source.connect(highpass);
     highpass.connect(lowpass);
     lowpass.connect(bus);
-    bus.connect(this.master);
+    this.connectLayerBus(bus, "breakAmbient");
 
     bus.gain.setValueAtTime(0, now);
     bus.gain.linearRampToValueAtTime(0.032, now + 5);
@@ -443,7 +506,7 @@ class SoundEngine {
     });
 
     filter.connect(bus);
-    bus.connect(this.master);
+    this.connectLayerBus(bus, "cue");
 
     bus.gain.setValueAtTime(0, now);
     bus.gain.linearRampToValueAtTime(0.16, now + Math.max(2, rampSeconds));
@@ -496,7 +559,7 @@ class SoundEngine {
     });
 
     filter.connect(bus);
-    bus.connect(this.master);
+    this.connectLayerBus(bus, "cue");
 
     bus.gain.setValueAtTime(0, now);
     bus.gain.linearRampToValueAtTime(peak, now + attack);
@@ -525,25 +588,78 @@ const ui = {
   timerDisplay: document.getElementById("timerDisplay"),
   statusText: document.getElementById("statusText"),
   intentionPreview: document.getElementById("intentionPreview"),
+  enableAudioBtn: document.getElementById("enableAudioBtn"),
   startFocusBtn: document.getElementById("startFocusBtn"),
   startBreakBtn: document.getElementById("startBreakBtn"),
   startNextFocusBtn: document.getElementById("startNextFocusBtn"),
+  transitionEarlyBtn: document.getElementById("transitionEarlyBtn"),
   resetBtn: document.getElementById("resetBtn"),
   profileHz: document.getElementById("profileHz"),
   profileDescription: document.getElementById("profileDescription"),
+  appVersion: document.getElementById("appVersion"),
+  masterSlider: document.getElementById("masterSlider"),
+  masterValue: document.getElementById("masterValue"),
+  focusSlider: document.getElementById("focusSlider"),
+  focusValue: document.getElementById("focusValue"),
+  binauralSlider: document.getElementById("binauralSlider"),
+  binauralValue: document.getElementById("binauralValue"),
+  padsSlider: document.getElementById("padsSlider"),
+  padsValue: document.getElementById("padsValue"),
+  alarmSlider: document.getElementById("alarmSlider"),
+  alarmValue: document.getElementById("alarmValue"),
+  breakAmbientSlider: document.getElementById("breakAmbientSlider"),
+  breakAmbientValue: document.getElementById("breakAmbientValue"),
+  cueSlider: document.getElementById("cueSlider"),
+  cueValue: document.getElementById("cueValue"),
 };
 
 const sound = new SoundEngine();
 
 let state = State.IDLE;
+let audioEnabled = false;
 let tickerId = null;
 let focusEndAt = 0;
 let breakEndAt = 0;
 let focusAlarmTimeoutId = null;
 let breakCueTimeoutId = null;
 
+const MIXER_BINDINGS = [
+  { slider: "masterSlider", value: "masterValue", target: "master" },
+  { slider: "focusSlider", value: "focusValue", target: "focus" },
+  { slider: "binauralSlider", value: "binauralValue", target: "binaural" },
+  { slider: "padsSlider", value: "padsValue", target: "pads" },
+  { slider: "alarmSlider", value: "alarmValue", target: "alarm" },
+  { slider: "breakAmbientSlider", value: "breakAmbientValue", target: "breakAmbient" },
+  { slider: "cueSlider", value: "cueValue", target: "cue" },
+];
+
 function getProfile() {
   return PROFILES[ui.profileSelect.value] || PROFILES.focus;
+}
+
+function sliderPercentToGain(percent) {
+  return Math.pow(Math.max(0, Math.min(100, percent)) / 100, 1.15);
+}
+
+function updateSliderReadout(element, percent) {
+  element.textContent = `${Math.round(percent)}%`;
+}
+
+function applyMixerBinding(binding) {
+  const sliderEl = ui[binding.slider];
+  const valueEl = ui[binding.value];
+  const percent = Number(sliderEl.value);
+  updateSliderReadout(valueEl, percent);
+  const gain = sliderPercentToGain(percent);
+  if (binding.target === "master") {
+    sound.setMasterLevel(gain);
+  } else {
+    sound.setMixLevel(binding.target, gain);
+  }
+}
+
+function applyMixerValues() {
+  MIXER_BINDINGS.forEach(applyMixerBinding);
 }
 
 function formatClock(seconds) {
@@ -582,10 +698,30 @@ function updateProfileCard() {
   ui.profileDescription.textContent = profile.description;
 }
 
+function updateTransitionButton() {
+  const isTransitionState = state === State.FOCUS || state === State.BREAK;
+  ui.transitionEarlyBtn.hidden = !isTransitionState;
+  if (state === State.FOCUS) {
+    ui.transitionEarlyBtn.textContent = "Transition To Focus End Cue";
+  } else if (state === State.BREAK) {
+    ui.transitionEarlyBtn.textContent = "Transition To Break End Cue";
+  }
+}
+
+function renderAudioState() {
+  ui.enableAudioBtn.hidden = audioEnabled;
+  ui.startFocusBtn.disabled = !audioEnabled;
+  ui.startBreakBtn.disabled = !audioEnabled;
+  ui.startNextFocusBtn.disabled = !audioEnabled;
+  ui.transitionEarlyBtn.disabled = !audioEnabled;
+}
+
 function renderButtons() {
   ui.startFocusBtn.hidden = state !== State.IDLE;
   ui.startBreakBtn.hidden = state !== State.FOCUS_DONE;
   ui.startNextFocusBtn.hidden = state !== State.BREAK_DONE;
+  updateTransitionButton();
+  renderAudioState();
 }
 
 function clearRuntimeTimers() {
@@ -624,10 +760,32 @@ function tick() {
   }
 }
 
+function requireAudioEnabled() {
+  if (audioEnabled) {
+    return true;
+  }
+  setStatus("Tap To Enable Audio first. Mobile browsers require this before synthesis can play.");
+  return false;
+}
+
+async function enableAudio() {
+  await sound.ensureContext();
+  audioEnabled = true;
+  applyMixerValues();
+  renderAudioState();
+  if (state === State.IDLE) {
+    setStatus("Audio enabled. Press Start Focus to begin.");
+  }
+}
+
 async function startFocus() {
   if (state === State.FOCUS || state === State.BREAK) {
     return;
   }
+  if (!requireAudioEnabled()) {
+    return;
+  }
+
   clearRuntimeTimers();
   const profile = getProfile();
   await sound.startFocus(profile);
@@ -638,8 +796,8 @@ async function startFocus() {
   const intention = ui.intentionInput.value.trim();
   setStatus(
     intention
-      ? `Focusing on "${intention}". Binaural split and pad are active.`
-      : "Focus session started. Binaural split and pad are active."
+      ? `Focusing on "${intention}". Binaural split and pads are active.`
+      : "Focus session started. Binaural split and pads are active."
   );
 
   setTimer(FOCUS_SECONDS);
@@ -672,7 +830,7 @@ function completeFocus() {
   renderButtons();
   setTimer(0);
   setPhaseLabel("Focus Complete");
-  setStatus("Focus block complete. Press Start Break when ready. The red-noise cue is now active.");
+  setStatus("Focus block complete. Press Start Break when ready.");
   sound.startFocusAlarm().catch((error) => {
     console.error(error);
   });
@@ -680,6 +838,9 @@ function completeFocus() {
 
 async function startBreak() {
   if (state !== State.FOCUS_DONE) {
+    return;
+  }
+  if (!requireAudioEnabled()) {
     return;
   }
   if (focusAlarmTimeoutId !== null) {
@@ -693,7 +854,7 @@ async function startBreak() {
   setVisualState(state);
   renderButtons();
   setPhaseLabel("Break Session");
-  setStatus("Break started. Gentle ocean-like noise is active. A harmonic return cue will bloom near the end.");
+  setStatus("Break started. Ocean-like ambience is active. The harmonic return cue blooms near the end.");
 
   setTimer(BREAK_SECONDS);
   breakEndAt = Date.now() + BREAK_SECONDS * 1000;
@@ -724,7 +885,7 @@ function completeBreak() {
   renderButtons();
   setTimer(0);
   setPhaseLabel("Break Complete");
-  setStatus("Break complete. Press Start Next Focus whenever you are ready.");
+  setStatus("Break complete. Press Start Next Focus when ready.");
 
   sound.startBreakReturnCue(getProfile(), 8).catch((error) => {
     console.error(error);
@@ -738,6 +899,45 @@ async function startNextFocus() {
   await startFocus();
 }
 
+async function transitionToEndCue() {
+  if (!requireAudioEnabled()) {
+    return;
+  }
+  if (state === State.FOCUS) {
+    const remaining = Math.max(0, (focusEndAt - Date.now()) / 1000);
+    if (focusAlarmTimeoutId !== null) {
+      window.clearTimeout(focusAlarmTimeoutId);
+      focusAlarmTimeoutId = null;
+    }
+    await sound.startFocusAlarm();
+    if (remaining > FOCUS_ALARM_FADE_SECONDS + 0.2) {
+      focusEndAt = Date.now() + FOCUS_ALARM_FADE_SECONDS * 1000;
+      setStatus("Transitioning to focus end cue now (about 20 seconds).");
+    } else {
+      setStatus("Focus session is already in its final transition.");
+    }
+    tick();
+    return;
+  }
+
+  if (state === State.BREAK) {
+    const remaining = Math.max(0, (breakEndAt - Date.now()) / 1000);
+    if (breakCueTimeoutId !== null) {
+      window.clearTimeout(breakCueTimeoutId);
+      breakCueTimeoutId = null;
+    }
+    const ramp = remaining > BREAK_RETURN_FADE_SECONDS ? BREAK_RETURN_FADE_SECONDS : Math.max(8, remaining);
+    await sound.startBreakReturnCue(getProfile(), ramp);
+    if (remaining > BREAK_RETURN_FADE_SECONDS + 0.2) {
+      breakEndAt = Date.now() + BREAK_RETURN_FADE_SECONDS * 1000;
+      setStatus("Transitioning to break end cue now (about 1 minute).");
+    } else {
+      setStatus("Break session is already in its final transition.");
+    }
+    tick();
+  }
+}
+
 function resetTimer() {
   clearRuntimeTimers();
   state = State.IDLE;
@@ -745,14 +945,18 @@ function resetTimer() {
   renderButtons();
   setPhaseLabel("Ready");
   setTimer(FOCUS_SECONDS);
-  setStatus("Press Start Focus to begin your first block.");
+  setStatus(
+    audioEnabled
+      ? "Press Start Focus to begin your first block."
+      : "Tap To Enable Audio first, then press Start Focus."
+  );
   sound.stopAll(1.8);
 }
 
 function runWithGuard(asyncFn) {
   asyncFn().catch((error) => {
     console.error(error);
-    setStatus("Audio could not be started. Try tapping the action button again.");
+    setStatus("Audio could not be started. Tap Enable Audio and try again.");
   });
 }
 
@@ -760,6 +964,10 @@ ui.intentionInput.addEventListener("input", updateIntentionPreview);
 
 ui.profileSelect.addEventListener("change", () => {
   updateProfileCard();
+});
+
+ui.enableAudioBtn.addEventListener("click", () => {
+  runWithGuard(enableAudio);
 });
 
 ui.startFocusBtn.addEventListener("click", () => {
@@ -774,8 +982,20 @@ ui.startNextFocusBtn.addEventListener("click", () => {
   runWithGuard(startNextFocus);
 });
 
+ui.transitionEarlyBtn.addEventListener("click", () => {
+  runWithGuard(transitionToEndCue);
+});
+
 ui.resetBtn.addEventListener("click", resetTimer);
 
+MIXER_BINDINGS.forEach((binding) => {
+  ui[binding.slider].addEventListener("input", () => {
+    applyMixerBinding(binding);
+  });
+});
+
+ui.appVersion.textContent = APP_VERSION;
 updateIntentionPreview();
 updateProfileCard();
+applyMixerValues();
 resetTimer();
