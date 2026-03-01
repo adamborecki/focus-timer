@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Focus Timer | Binaural Pomodoro</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,700&family=Sora:wght@300;400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body data-phase="idle">
+    <div class="ambient-shape ambient-shape-a"></div>
+    <div class="ambient-shape ambient-shape-b"></div>
+
+    <main class="app-shell">
+      <header class="hero panel">
+        <p class="eyebrow">Binaural Pomodoro Studio</p>
+        <h1>Deep Focus Orbit</h1>
+        <p class="hero-subtitle">
+          A musical focus timer with masked binaural beats, slow-evolving cues, and gentle break transitions.
+        </p>
+      </header>
+
+      <section class="controls panel">
+        <label for="intentionInput" class="field">
+          <span class="field-label">I am focusing on</span>
+          <input
+            id="intentionInput"
+            type="text"
+            maxlength="120"
+            placeholder="writing chapter 2, debugging auth flow, composing..."
+            autocomplete="off"
+          />
+        </label>
+
+        <label for="profileSelect" class="field">
+          <span class="field-label">Binaural profile</span>
+          <select id="profileSelect">
+            <option value="focus">Focus - beta lift</option>
+            <option value="creativity">Creativity - alpha blend</option>
+            <option value="relaxation">Relaxation - theta drift</option>
+          </select>
+        </label>
+      </section>
+
+      <section class="timer panel">
+        <p id="phaseLabel" class="phase-label">Ready</p>
+        <p id="timerDisplay" class="timer-display" aria-live="polite">25:00</p>
+        <p id="statusText" class="status-text">Press Start Focus to begin your first block.</p>
+        <p id="intentionPreview" class="intention-preview">No intention set yet.</p>
+      </section>
+
+      <section class="actions panel">
+        <button id="startFocusBtn" class="btn btn-primary">Start Focus</button>
+        <button id="startBreakBtn" class="btn btn-primary" hidden>Start Break</button>
+        <button id="startNextFocusBtn" class="btn btn-primary" hidden>Start Next Focus</button>
+        <button id="resetBtn" class="btn btn-ghost">Reset</button>
+      </section>
+
+      <section class="profile panel">
+        <p class="profile-title">Current profile</p>
+        <p id="profileHz" class="profile-hz"></p>
+        <p id="profileDescription" class="profile-description"></p>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
