@@ -1,8 +1,22 @@
-const APP_VERSION = "v1.1.0";
-const FOCUS_SECONDS = 25 * 60;
-const BREAK_SECONDS = 4 * 60;
+const APP_VERSION = "v1.2.0";
+const RHYTHM = Object.freeze({
+  focusSeconds: 25 * 60,
+  shortBreakSeconds: 5 * 60,
+  longBreakSeconds: 15 * 60,
+  longBreakInterval: 3,
+  restoreWindowMs: 2 * 60 * 60 * 1000,
+});
+const FOCUS_SECONDS = RHYTHM.focusSeconds;
+const SHORT_BREAK_SECONDS = RHYTHM.shortBreakSeconds;
+const LONG_BREAK_SECONDS = RHYTHM.longBreakSeconds;
 const FOCUS_ALARM_FADE_SECONDS = 20;
 const BREAK_RETURN_FADE_SECONDS = 60;
+const STORAGE_KEY = "focus-timer-session-v1";
+
+const BreakKind = Object.freeze({
+  SHORT: "short",
+  LONG: "long",
+});
 
 const PROFILES = {
   focus: {
@@ -585,8 +599,13 @@ const ui = {
   intentionInput: document.getElementById("intentionInput"),
   profileSelect: document.getElementById("profileSelect"),
   phaseLabel: document.getElementById("phaseLabel"),
+  cycleLabel: document.getElementById("cycleLabel"),
+  rhythmLabel: document.getElementById("rhythmLabel"),
+  cycleDots: Array.from(document.querySelectorAll("#cycleDots .cycle-dot")),
   timerDisplay: document.getElementById("timerDisplay"),
   statusText: document.getElementById("statusText"),
+  coachPrompt: document.getElementById("coachPrompt"),
+  copyCoachPromptBtn: document.getElementById("copyCoachPromptBtn"),
   intentionPreview: document.getElementById("intentionPreview"),
   enableAudioBtn: document.getElementById("enableAudioBtn"),
   startFocusBtn: document.getElementById("startFocusBtn"),
@@ -622,6 +641,10 @@ let focusEndAt = 0;
 let breakEndAt = 0;
 let focusAlarmTimeoutId = null;
 let breakCueTimeoutId = null;
+let completedFocusBlocks = 0;
+let currentBreakKind = BreakKind.SHORT;
+let sessionStartedAt = 0;
+let copyPromptTimeoutId = null;
 
 const MIXER_BINDINGS = [
   { slider: "masterSlider", value: "masterValue", target: "master" },
@@ -662,6 +685,72 @@ function applyMixerValues() {
   MIXER_BINDINGS.forEach(applyMixerBinding);
 }
 
+function getBreakKindForCompletedCount(count) {
+  if (count > 0 && count % RHYTHM.longBreakInterval === 0) {
+    return BreakKind.LONG;
+  }
+  return BreakKind.SHORT;
+}
+
+function getCurrentCyclePosition() {
+  const cycleCount = completedFocusBlocks % RHYTHM.longBreakInterval;
+  if (cycleCount === 0 && completedFocusBlocks > 0) {
+    return RHYTHM.longBreakInterval;
+  }
+  return cycleCount;
+}
+
+function getNextBlockNumber() {
+  return (completedFocusBlocks % RHYTHM.longBreakInterval) + 1;
+}
+
+function getBreakSeconds(kind = currentBreakKind) {
+  return kind === BreakKind.LONG ? LONG_BREAK_SECONDS : SHORT_BREAK_SECONDS;
+}
+
+function getBreakFloorLabel(kind = currentBreakKind) {
+  const minutes = Math.round(getBreakSeconds(kind) / 60);
+  return kind === BreakKind.LONG ? `${minutes}+ min reset` : `${minutes} min reset`;
+}
+
+function getUpcomingBreakKind() {
+  return getBreakKindForCompletedCount(completedFocusBlocks + 1);
+}
+
+function clearPersistedSession() {
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch (_error) {
+    // Storage may not be available in some browsers or modes.
+  }
+}
+
+function persistSession() {
+  if (!sessionStartedAt || (state === State.IDLE && completedFocusBlocks === 0)) {
+    clearPersistedSession();
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        state,
+        sessionStartedAt,
+        completedFocusBlocks,
+        currentBreakKind,
+        focusEndAt,
+        breakEndAt,
+        intention: ui.intentionInput.value,
+        profileKey: ui.profileSelect.value,
+        savedAt: Date.now(),
+      })
+    );
+  } catch (_error) {
+    // Ignore persistence failures and keep the timer usable.
+  }
+}
+
 function formatClock(seconds) {
   const total = Math.max(0, Math.ceil(seconds));
   const minutes = Math.floor(total / 60);
@@ -688,6 +777,8 @@ function setVisualState(nextState) {
 function updateIntentionPreview() {
   const value = ui.intentionInput.value.trim();
   ui.intentionPreview.textContent = value ? `Current intention: "${value}"` : "No intention set yet.";
+  updateCoachPanel();
+  persistSession();
 }
 
 function updateProfileCard() {
@@ -698,13 +789,115 @@ function updateProfileCard() {
   ui.profileDescription.textContent = profile.description;
 }
 
+function updateCycleDots() {
+  const nextBlock = getNextBlockNumber();
+  const completedInCycle = getCurrentCyclePosition();
+
+  ui.cycleDots.forEach((dot, index) => {
+    const step = index + 1;
+    dot.classList.remove("is-complete", "is-active");
+
+    if (state === State.FOCUS_DONE || state === State.BREAK || state === State.BREAK_DONE) {
+      if (step <= completedInCycle) {
+        dot.classList.add("is-complete");
+      }
+      return;
+    }
+
+    if (step < nextBlock) {
+      dot.classList.add("is-complete");
+    } else if (step === nextBlock) {
+      dot.classList.add("is-active");
+    }
+  });
+}
+
+function buildCoachPromptText() {
+  const intention = ui.intentionInput.value.trim();
+  const namedBlock = intention ? `"${intention}"` : "this block";
+
+  if (state === State.FOCUS) {
+    return intention
+      ? `Stay with ${namedBlock} until it stops being the right block. If the work shifts, rename it and keep going.`
+      : "Stay with one concrete verb. If the work shifts, rename the block and keep going.";
+  }
+
+  if (state === State.FOCUS_DONE) {
+    if (currentBreakKind === BreakKind.LONG) {
+      return "You finished a full cycle. Take a real reset now. Fifteen minutes is the floor, and lunch can be longer.";
+    }
+    return "Block complete. Step away for five minutes if you can, then choose the cleanest next verb before you return.";
+  }
+
+  if (state === State.BREAK) {
+    if (currentBreakKind === BreakKind.LONG) {
+      return "Long break floor is running. Walk, eat, stretch, or do one house task. Come back when your head feels clearer.";
+    }
+    return "Short break floor is running. Stand up, walk, stretch, or do one house thing before you come back.";
+  }
+
+  if (state === State.BREAK_DONE) {
+    if (currentBreakKind === BreakKind.LONG) {
+      return "Long break floor reached. Start the next block when you feel ready, not because the timer is judging you.";
+    }
+    return "Break floor reached. Choose the next verb before you come back in.";
+  }
+
+  return "Start with a clear verb, then let the rhythm coach your breaks without turning the day into a streak.";
+}
+
+function buildCheckInPrompt() {
+  const intention = ui.intentionInput.value.trim() || "unnamed block";
+  const cyclePosition =
+    state === State.FOCUS || state === State.IDLE ? getNextBlockNumber() : getCurrentCyclePosition();
+  const recommendedBreak = currentBreakKind === BreakKind.LONG ? "a long break or lunch" : "a short break";
+
+  return [
+    "Help me do a fast focus check-in.",
+    `Current intention: ${intention}.`,
+    `Current cycle position: block ${cyclePosition} of ${RHYTHM.longBreakInterval}.`,
+    `Recommended reset: ${recommendedBreak}.`,
+    "",
+    "Please help me answer:",
+    "1. What moved forward?",
+    "2. What changed or got in the way?",
+    "3. What should my next block be called, starting with a verb?",
+    "4. Should I take a short break, a long break, or make the next block smaller?",
+  ].join("\n");
+}
+
+function updateCoachPanel() {
+  const upcomingBreakKind = getUpcomingBreakKind();
+  const completedInCycle = getCurrentCyclePosition();
+
+  if (state === State.FOCUS_DONE || state === State.BREAK || state === State.BREAK_DONE) {
+    ui.cycleLabel.textContent = `Block ${completedInCycle} complete`;
+    if (state === State.BREAK_DONE) {
+      ui.rhythmLabel.textContent =
+        currentBreakKind === BreakKind.LONG ? "Long break floor reached" : "Break floor reached";
+    } else {
+      ui.rhythmLabel.textContent = `${getBreakFloorLabel(currentBreakKind)} floor`;
+    }
+  } else {
+    ui.cycleLabel.textContent = `Block ${getNextBlockNumber()} of ${RHYTHM.longBreakInterval}`;
+    ui.rhythmLabel.textContent =
+      upcomingBreakKind === BreakKind.LONG
+        ? `Next long break ${Math.round(LONG_BREAK_SECONDS / 60)}+ min`
+        : `Next break ${Math.round(SHORT_BREAK_SECONDS / 60)} min`;
+  }
+
+  ui.coachPrompt.textContent = buildCoachPromptText();
+  ui.copyCoachPromptBtn.hidden = !(state === State.FOCUS_DONE || state === State.BREAK || state === State.BREAK_DONE);
+  updateCycleDots();
+}
+
 function updateTransitionButton() {
   const isTransitionState = state === State.FOCUS || state === State.BREAK;
   ui.transitionEarlyBtn.hidden = !isTransitionState;
   if (state === State.FOCUS) {
-    ui.transitionEarlyBtn.textContent = "Transition To Focus End Cue";
+    ui.transitionEarlyBtn.textContent = "Wrap This Block";
   } else if (state === State.BREAK) {
-    ui.transitionEarlyBtn.textContent = "Transition To Break End Cue";
+    ui.transitionEarlyBtn.textContent = "Wrap This Break";
   }
 }
 
@@ -720,8 +913,11 @@ function renderButtons() {
   ui.startFocusBtn.hidden = state !== State.IDLE;
   ui.startBreakBtn.hidden = state !== State.FOCUS_DONE;
   ui.startNextFocusBtn.hidden = state !== State.BREAK_DONE;
+  ui.startBreakBtn.textContent = currentBreakKind === BreakKind.LONG ? "Start Long Break" : "Start Break";
+  ui.startNextFocusBtn.textContent = "Start Next Block";
   updateTransitionButton();
   renderAudioState();
+  updateCoachPanel();
 }
 
 function clearRuntimeTimers() {
@@ -760,12 +956,235 @@ function tick() {
   }
 }
 
+function scheduleFocusAlarmForCurrentSession() {
+  if (focusAlarmTimeoutId !== null) {
+    window.clearTimeout(focusAlarmTimeoutId);
+    focusAlarmTimeoutId = null;
+  }
+
+  const remaining = Math.max(0, (focusEndAt - Date.now()) / 1000);
+  if (remaining <= FOCUS_ALARM_FADE_SECONDS + 0.2) {
+    if (audioEnabled) {
+      sound.startFocusAlarm().catch((error) => {
+        console.error(error);
+      });
+    }
+    return;
+  }
+
+  focusAlarmTimeoutId = window.setTimeout(() => {
+    if (!audioEnabled) {
+      return;
+    }
+    sound.startFocusAlarm().catch((error) => {
+      console.error(error);
+      setStatus("Could not start the focus end cue. Try pressing Start Focus again.");
+    });
+  }, Math.max(0, (remaining - FOCUS_ALARM_FADE_SECONDS) * 1000));
+}
+
+function scheduleBreakCueForCurrentSession(profile) {
+  if (breakCueTimeoutId !== null) {
+    window.clearTimeout(breakCueTimeoutId);
+    breakCueTimeoutId = null;
+  }
+
+  const remaining = Math.max(0, (breakEndAt - Date.now()) / 1000);
+  if (remaining <= BREAK_RETURN_FADE_SECONDS + 0.2) {
+    if (audioEnabled) {
+      const ramp = Math.max(8, remaining);
+      sound.startBreakReturnCue(profile, ramp).catch((error) => {
+        console.error(error);
+      });
+    }
+    return;
+  }
+
+  breakCueTimeoutId = window.setTimeout(() => {
+    if (!audioEnabled) {
+      return;
+    }
+    sound.startBreakReturnCue(profile, BREAK_RETURN_FADE_SECONDS).catch((error) => {
+      console.error(error);
+    });
+  }, Math.max(0, (remaining - BREAK_RETURN_FADE_SECONDS) * 1000));
+}
+
+function restoreRuntimeTimers() {
+  if (state === State.FOCUS) {
+    tickerId = window.setInterval(tick, 250);
+    scheduleFocusAlarmForCurrentSession();
+    return;
+  }
+
+  if (state === State.BREAK) {
+    tickerId = window.setInterval(tick, 250);
+    scheduleBreakCueForCurrentSession(getProfile());
+  }
+}
+
+function applyRestoredState() {
+  const now = Date.now();
+  if (state === State.FOCUS && !focusEndAt) {
+    resetTimer();
+    return;
+  }
+
+  if (state === State.BREAK && !breakEndAt) {
+    resetTimer();
+    return;
+  }
+
+  if (state === State.FOCUS && focusEndAt <= now) {
+    completedFocusBlocks += 1;
+    currentBreakKind = getBreakKindForCompletedCount(completedFocusBlocks);
+    state = State.FOCUS_DONE;
+  }
+  if (state === State.BREAK && breakEndAt <= now) {
+    state = State.BREAK_DONE;
+  }
+
+  setVisualState(state);
+  renderButtons();
+
+  if (state === State.FOCUS) {
+    setPhaseLabel("Focus Block");
+    setTimer((focusEndAt - now) / 1000);
+    setStatus("Focus block restored. Tap Enable Audio if you want the soundscape back.");
+    restoreRuntimeTimers();
+    return;
+  }
+
+  if (state === State.FOCUS_DONE) {
+    setPhaseLabel(currentBreakKind === BreakKind.LONG ? "Long Break Due" : "Break Due");
+    setTimer(0);
+    setStatus(
+      currentBreakKind === BreakKind.LONG
+        ? "Cycle complete. A long break is due. Fifteen minutes is the floor, and lunch can be longer."
+        : "Block complete. A short break is due whenever you're ready."
+    );
+    return;
+  }
+
+  if (state === State.BREAK) {
+    setPhaseLabel(currentBreakKind === BreakKind.LONG ? "Long Break" : "Break");
+    setTimer((breakEndAt - now) / 1000);
+    setStatus(
+      currentBreakKind === BreakKind.LONG
+        ? "Long break restored. Take the time you need."
+        : "Break restored. Stretch, walk, or clear one small task."
+    );
+    restoreRuntimeTimers();
+    return;
+  }
+
+  if (state === State.BREAK_DONE) {
+    setPhaseLabel(currentBreakKind === BreakKind.LONG ? "Long Break Floor Reached" : "Break Floor Reached");
+    setTimer(0);
+    setStatus(
+      currentBreakKind === BreakKind.LONG
+        ? "Long break floor reached. Start the next block whenever you're ready."
+        : "Break floor reached. Start the next block whenever you're ready."
+    );
+    return;
+  }
+
+  resetTimer();
+}
+
+function restoreSession() {
+  let savedSession;
+
+  try {
+    savedSession = JSON.parse(window.localStorage.getItem(STORAGE_KEY));
+  } catch (_error) {
+    clearPersistedSession();
+    return false;
+  }
+
+  if (!savedSession || typeof savedSession !== "object") {
+    return false;
+  }
+
+  if (!savedSession.sessionStartedAt || Date.now() - Number(savedSession.sessionStartedAt) > RHYTHM.restoreWindowMs) {
+    clearPersistedSession();
+    return false;
+  }
+
+  if (savedSession.profileKey && PROFILES[savedSession.profileKey]) {
+    ui.profileSelect.value = savedSession.profileKey;
+  }
+
+  sessionStartedAt = Number(savedSession.sessionStartedAt) || 0;
+  completedFocusBlocks = Math.max(0, Number(savedSession.completedFocusBlocks) || 0);
+  currentBreakKind = savedSession.currentBreakKind === BreakKind.LONG ? BreakKind.LONG : BreakKind.SHORT;
+  focusEndAt = Number(savedSession.focusEndAt) || 0;
+  breakEndAt = Number(savedSession.breakEndAt) || 0;
+  ui.intentionInput.value = typeof savedSession.intention === "string" ? savedSession.intention : "";
+
+  if (Object.values(State).includes(savedSession.state)) {
+    state = savedSession.state;
+  } else {
+    state = State.IDLE;
+  }
+
+  updateProfileCard();
+  updateIntentionPreview();
+  applyRestoredState();
+  persistSession();
+  return true;
+}
+
 function requireAudioEnabled() {
   if (audioEnabled) {
     return true;
   }
-  setStatus("Tap To Enable Audio first. Mobile browsers require this before synthesis can play.");
+  setStatus("Enable Audio first. Browsers require a tap before synthesis can play.");
   return false;
+}
+
+async function resumeSoundscapeForCurrentState() {
+  const profile = getProfile();
+
+  if (state === State.FOCUS) {
+    await sound.startFocus(profile);
+    const remaining = Math.max(0, (focusEndAt - Date.now()) / 1000);
+    if (remaining <= FOCUS_ALARM_FADE_SECONDS + 0.2) {
+      await sound.startFocusAlarm();
+    }
+    setStatus("Focus block restored. Soundscape is back.");
+    return;
+  }
+
+  if (state === State.FOCUS_DONE) {
+    sound.stopAll(1);
+    await sound.startFocusAlarm();
+    setStatus(
+      currentBreakKind === BreakKind.LONG
+        ? "Cycle complete. Long break is due, and the cue is back."
+        : "Block complete. Break is due, and the cue is back."
+    );
+    return;
+  }
+
+  if (state === State.BREAK) {
+    await sound.startBreak(profile);
+    const remaining = Math.max(0, (breakEndAt - Date.now()) / 1000);
+    if (remaining <= BREAK_RETURN_FADE_SECONDS + 0.2) {
+      await sound.startBreakReturnCue(profile, Math.max(8, remaining));
+    }
+    setStatus(currentBreakKind === BreakKind.LONG ? "Long break ambience is back." : "Break ambience is back.");
+    return;
+  }
+
+  if (state === State.BREAK_DONE) {
+    await sound.startBreakReturnCue(profile, 8);
+    setStatus(
+      currentBreakKind === BreakKind.LONG
+        ? "Long break floor reached. Return when you're ready."
+        : "Break floor reached. Return when you're ready."
+    );
+  }
 }
 
 async function enableAudio() {
@@ -775,7 +1194,10 @@ async function enableAudio() {
   renderAudioState();
   if (state === State.IDLE) {
     setStatus("Audio enabled. Press Start Focus to begin.");
+    return;
   }
+
+  await resumeSoundscapeForCurrentState();
 }
 
 async function startFocus() {
@@ -787,30 +1209,29 @@ async function startFocus() {
   }
 
   clearRuntimeTimers();
+  if (!sessionStartedAt) {
+    sessionStartedAt = Date.now();
+  }
+
   const profile = getProfile();
   await sound.startFocus(profile);
   state = State.FOCUS;
   setVisualState(state);
   renderButtons();
-  setPhaseLabel("Focus Session");
+  setPhaseLabel("Focus Block");
   const intention = ui.intentionInput.value.trim();
   setStatus(
     intention
-      ? `Focusing on "${intention}". Binaural split and pads are active.`
-      : "Focus session started. Binaural split and pads are active."
+      ? `Focus block started: "${intention}". Rename it anytime if the work shifts.`
+      : "Focus block started. Give it one clear verb and let it evolve if the day changes."
   );
 
   setTimer(FOCUS_SECONDS);
   focusEndAt = Date.now() + FOCUS_SECONDS * 1000;
-  const alarmDelay = Math.max(0, (FOCUS_SECONDS - FOCUS_ALARM_FADE_SECONDS) * 1000);
-  focusAlarmTimeoutId = window.setTimeout(() => {
-    sound.startFocusAlarm().catch((error) => {
-      console.error(error);
-      setStatus("Could not start the focus end cue. Try pressing Start Focus again.");
-    });
-  }, alarmDelay);
-
+  breakEndAt = 0;
+  scheduleFocusAlarmForCurrentSession();
   tickerId = window.setInterval(tick, 250);
+  persistSession();
 }
 
 function completeFocus() {
@@ -825,15 +1246,22 @@ function completeFocus() {
     window.clearTimeout(focusAlarmTimeoutId);
     focusAlarmTimeoutId = null;
   }
+  completedFocusBlocks += 1;
+  currentBreakKind = getBreakKindForCompletedCount(completedFocusBlocks);
   state = State.FOCUS_DONE;
   setVisualState(state);
   renderButtons();
   setTimer(0);
-  setPhaseLabel("Focus Complete");
-  setStatus("Focus block complete. Press Start Break when ready.");
+  setPhaseLabel(currentBreakKind === BreakKind.LONG ? "Long Break Due" : "Break Due");
+  setStatus(
+    currentBreakKind === BreakKind.LONG
+      ? "Cycle complete. Take a real break now. Fifteen minutes is the floor, and lunch can be longer."
+      : "Block complete. Take a five-minute break when you're ready."
+  );
   sound.startFocusAlarm().catch((error) => {
     console.error(error);
   });
+  persistSession();
 }
 
 async function startBreak() {
@@ -849,23 +1277,24 @@ async function startBreak() {
   }
 
   const profile = getProfile();
+  const breakSeconds = getBreakSeconds(currentBreakKind);
   await sound.startBreak(profile);
   state = State.BREAK;
   setVisualState(state);
   renderButtons();
-  setPhaseLabel("Break Session");
-  setStatus("Break started. Ocean-like ambience is active. The harmonic return cue blooms near the end.");
+  setPhaseLabel(currentBreakKind === BreakKind.LONG ? "Long Break" : "Break");
+  setStatus(
+    currentBreakKind === BreakKind.LONG
+      ? "Long break started. Reset properly. Fifteen minutes is the floor, and staying away longer for lunch is fine."
+      : "Break started. Stand up, walk, stretch, or knock out one small house task."
+  );
 
-  setTimer(BREAK_SECONDS);
-  breakEndAt = Date.now() + BREAK_SECONDS * 1000;
-  const cueDelay = Math.max(0, (BREAK_SECONDS - BREAK_RETURN_FADE_SECONDS) * 1000);
-  breakCueTimeoutId = window.setTimeout(() => {
-    sound.startBreakReturnCue(profile, BREAK_RETURN_FADE_SECONDS).catch((error) => {
-      console.error(error);
-    });
-  }, cueDelay);
-
+  setTimer(breakSeconds);
+  breakEndAt = Date.now() + breakSeconds * 1000;
+  focusEndAt = 0;
+  scheduleBreakCueForCurrentSession(profile);
   tickerId = window.setInterval(tick, 250);
+  persistSession();
 }
 
 function completeBreak() {
@@ -884,12 +1313,17 @@ function completeBreak() {
   setVisualState(state);
   renderButtons();
   setTimer(0);
-  setPhaseLabel("Break Complete");
-  setStatus("Break complete. Press Start Next Focus when ready.");
+  setPhaseLabel(currentBreakKind === BreakKind.LONG ? "Long Break Floor Reached" : "Break Floor Reached");
+  setStatus(
+    currentBreakKind === BreakKind.LONG
+      ? "Long break floor reached. Start the next block whenever you're ready."
+      : "Break floor reached. Start the next block whenever you're ready."
+  );
 
   sound.startBreakReturnCue(getProfile(), 8).catch((error) => {
     console.error(error);
   });
+  persistSession();
 }
 
 async function startNextFocus() {
@@ -912,11 +1346,12 @@ async function transitionToEndCue() {
     await sound.startFocusAlarm();
     if (remaining > FOCUS_ALARM_FADE_SECONDS + 0.2) {
       focusEndAt = Date.now() + FOCUS_ALARM_FADE_SECONDS * 1000;
-      setStatus("Transitioning to focus end cue now (about 20 seconds).");
+      setStatus("Wrapping this block now. End cue lands in about 20 seconds.");
     } else {
-      setStatus("Focus session is already in its final transition.");
+      setStatus("This block is already in its final transition.");
     }
     tick();
+    persistSession();
     return;
   }
 
@@ -930,17 +1365,26 @@ async function transitionToEndCue() {
     await sound.startBreakReturnCue(getProfile(), ramp);
     if (remaining > BREAK_RETURN_FADE_SECONDS + 0.2) {
       breakEndAt = Date.now() + BREAK_RETURN_FADE_SECONDS * 1000;
-      setStatus("Transitioning to break end cue now (about 1 minute).");
+      setStatus("Wrapping this break now. Return cue lands in about a minute.");
     } else {
-      setStatus("Break session is already in its final transition.");
+      setStatus("This break is already in its final transition.");
     }
     tick();
+    persistSession();
   }
 }
 
 function resetTimer() {
   clearRuntimeTimers();
+  if (copyPromptTimeoutId !== null) {
+    window.clearTimeout(copyPromptTimeoutId);
+    copyPromptTimeoutId = null;
+  }
+  ui.copyCoachPromptBtn.textContent = "Copy AI Check-In Prompt";
   state = State.IDLE;
+  completedFocusBlocks = 0;
+  currentBreakKind = BreakKind.SHORT;
+  sessionStartedAt = 0;
   setVisualState(state);
   renderButtons();
   setPhaseLabel("Ready");
@@ -948,9 +1392,10 @@ function resetTimer() {
   setStatus(
     audioEnabled
       ? "Press Start Focus to begin your first block."
-      : "Tap To Enable Audio first, then press Start Focus."
+      : "Enable Audio, then press Start Focus."
   );
   sound.stopAll(1.8);
+  clearPersistedSession();
 }
 
 function runWithGuard(asyncFn) {
@@ -960,10 +1405,29 @@ function runWithGuard(asyncFn) {
   });
 }
 
+async function copyCoachPrompt() {
+  const prompt = buildCheckInPrompt();
+  if (!navigator.clipboard || typeof navigator.clipboard.writeText !== "function") {
+    setStatus("Clipboard access is not available here, but the coach prompt is visible on screen.");
+    return;
+  }
+
+  await navigator.clipboard.writeText(prompt);
+  ui.copyCoachPromptBtn.textContent = "Copied";
+  if (copyPromptTimeoutId !== null) {
+    window.clearTimeout(copyPromptTimeoutId);
+  }
+  copyPromptTimeoutId = window.setTimeout(() => {
+    ui.copyCoachPromptBtn.textContent = "Copy AI Check-In Prompt";
+    copyPromptTimeoutId = null;
+  }, 1800);
+}
+
 ui.intentionInput.addEventListener("input", updateIntentionPreview);
 
 ui.profileSelect.addEventListener("change", () => {
   updateProfileCard();
+  persistSession();
 });
 
 ui.enableAudioBtn.addEventListener("click", () => {
@@ -986,6 +1450,13 @@ ui.transitionEarlyBtn.addEventListener("click", () => {
   runWithGuard(transitionToEndCue);
 });
 
+ui.copyCoachPromptBtn.addEventListener("click", () => {
+  copyCoachPrompt().catch((error) => {
+    console.error(error);
+    setStatus("Could not copy the coach prompt. Try again in a moment.");
+  });
+});
+
 ui.resetBtn.addEventListener("click", resetTimer);
 
 MIXER_BINDINGS.forEach((binding) => {
@@ -995,7 +1466,10 @@ MIXER_BINDINGS.forEach((binding) => {
 });
 
 ui.appVersion.textContent = APP_VERSION;
-updateIntentionPreview();
-updateProfileCard();
 applyMixerValues();
-resetTimer();
+
+if (!restoreSession()) {
+  updateProfileCard();
+  updateIntentionPreview();
+  resetTimer();
+}

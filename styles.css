@@ -8,9 +8,11 @@
   --panel-border: rgba(23, 36, 42, 0.08);
   --focus: #1f7a7b;
   --focus-deep: #0f4f53;
+  --focus-soft: rgba(31, 122, 123, 0.14);
   --accent: #d5852f;
   --accent-soft: #f0be80;
   --danger: #8f3b3b;
+  --break-soft: rgba(213, 133, 47, 0.16);
   --control-bg: rgba(255, 255, 255, 0.85);
 }
 
@@ -128,6 +130,12 @@ h1 {
   gap: 0.4rem;
 }
 
+.field-hint {
+  font-size: 0.8rem;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
 .field-label {
   font-size: 0.78rem;
   letter-spacing: 0.04em;
@@ -165,6 +173,59 @@ select:focus {
   padding: 1.2rem 1rem 1.3rem;
 }
 
+.session-meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.55rem;
+  margin: 0.7rem 0 0;
+}
+
+.cycle-label,
+.rhythm-label {
+  margin: 0;
+  border: 1px solid rgba(23, 36, 42, 0.08);
+  border-radius: 999px;
+  padding: 0.34rem 0.68rem;
+  font-size: 0.76rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.cycle-label {
+  color: var(--focus-deep);
+}
+
+.rhythm-label {
+  color: #7a4b14;
+  background: rgba(240, 190, 128, 0.18);
+}
+
+.cycle-dots {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin: 0.85rem 0 0;
+}
+
+.cycle-dot {
+  width: 2.7rem;
+  height: 0.42rem;
+  border-radius: 999px;
+  background: rgba(23, 36, 42, 0.1);
+  transition: transform 180ms ease, background-color 180ms ease, opacity 180ms ease;
+}
+
+.cycle-dot.is-complete {
+  background: linear-gradient(130deg, var(--focus) 10%, #47a2a5 92%);
+}
+
+.cycle-dot.is-active {
+  background: linear-gradient(130deg, var(--accent) 10%, var(--accent-soft) 92%);
+  transform: scaleY(1.15);
+}
+
 .phase-label {
   margin: 0;
   font-size: 0.86rem;
@@ -189,6 +250,20 @@ select:focus {
   color: var(--muted);
   font-size: 0.92rem;
   line-height: 1.35;
+}
+
+.coach-prompt {
+  margin: 0.85rem auto 0;
+  max-width: 30rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 1rem;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(255, 255, 255, 0.5)),
+    linear-gradient(135deg, rgba(31, 122, 123, 0.07), rgba(213, 133, 47, 0.07));
+  border: 1px solid rgba(23, 36, 42, 0.08);
+  color: #223c42;
+  font-size: 0.9rem;
+  line-height: 1.45;
 }
 
 .intention-preview {
@@ -246,6 +321,12 @@ select:focus {
   color: #29474d;
   background: rgba(255, 255, 255, 0.62);
   border: 1px solid rgba(23, 36, 42, 0.14);
+}
+
+.btn-small {
+  margin-top: 0.8rem;
+  padding: 0.55rem 0.9rem;
+  font-size: 0.78rem;
 }
 
 .profile-title {
@@ -363,12 +444,29 @@ body[data-phase="focus"] .timer {
   box-shadow: 0 20px 32px rgba(18, 99, 102, 0.24);
 }
 
+body[data-phase="focus"] .coach-prompt {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.84), rgba(255, 255, 255, 0.48)),
+    linear-gradient(135deg, rgba(31, 122, 123, 0.12), rgba(31, 122, 123, 0.03));
+}
+
 body[data-phase="focus_done"] .timer {
   box-shadow: 0 20px 32px rgba(145, 59, 59, 0.25);
 }
 
+body[data-phase="focus_done"] .rhythm-label {
+  background: rgba(240, 190, 128, 0.24);
+}
+
 body[data-phase="break"] .timer {
   box-shadow: 0 20px 32px rgba(213, 133, 47, 0.24);
+}
+
+body[data-phase="break"] .coach-prompt,
+body[data-phase="break_done"] .coach-prompt {
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.84), rgba(255, 255, 255, 0.48)),
+    linear-gradient(135deg, rgba(240, 190, 128, 0.16), rgba(213, 133, 47, 0.05));
 }
 
 body[data-phase="break_done"] .timer {
@@ -464,9 +562,11 @@ body[data-phase="break_done"] .timer {
     --panel-border: rgba(210, 232, 238, 0.12);
     --focus: #5ab5b7;
     --focus-deep: #95d8d9;
+    --focus-soft: rgba(90, 181, 183, 0.18);
     --accent: #ecac63;
     --accent-soft: #ebc091;
     --danger: #dc8a8a;
+    --break-soft: rgba(236, 172, 99, 0.18);
     --control-bg: rgba(12, 21, 25, 0.82);
   }
 
@@ -486,6 +586,25 @@ body[data-phase="break_done"] .timer {
     color: #d2e3e7;
     background: rgba(16, 28, 34, 0.72);
     border-color: rgba(205, 231, 237, 0.2);
+  }
+
+  .cycle-label,
+  .rhythm-label {
+    border-color: rgba(214, 235, 240, 0.12);
+    background: rgba(13, 24, 29, 0.72);
+  }
+
+  .rhythm-label {
+    color: #f0c891;
+    background: rgba(70, 45, 18, 0.42);
+  }
+
+  .coach-prompt {
+    color: #d3e3e7;
+    background:
+      linear-gradient(135deg, rgba(13, 24, 29, 0.92), rgba(13, 24, 29, 0.72)),
+      linear-gradient(135deg, rgba(90, 181, 183, 0.12), rgba(236, 172, 99, 0.07));
+    border-color: rgba(210, 232, 238, 0.1);
   }
 
   .intention-preview {

@@ -21,7 +21,8 @@
         <p class="eyebrow">Binaural Pomodoro Studio</p>
         <h1>focus-timer</h1>
         <p class="hero-subtitle">
-          A musical focus timer with masked binaural beats, slow-evolving cues, and gentle break transitions.
+          A flexible focus rhythm with musical cues, visible momentum, and coach-like reminders that leave room
+          for real life.
         </p>
       </header>
 
@@ -32,9 +33,10 @@
             id="intentionInput"
             type="text"
             maxlength="120"
-            placeholder="writing chapter 2, debugging auth flow, composing..."
+            placeholder="write release notes, clear kitchen counters, outline landing page..."
             autocomplete="off"
           />
+          <span class="field-hint">Start with a verb. Rename the block anytime if the day shifts.</span>
         </label>
 
         <label for="profileSelect" class="field">
@@ -49,17 +51,30 @@
 
       <section class="timer panel">
         <p id="phaseLabel" class="phase-label">Ready</p>
+        <div class="session-meta">
+          <p id="cycleLabel" class="cycle-label">Block 1 of 3</p>
+          <p id="rhythmLabel" class="rhythm-label">Next break 5 min</p>
+        </div>
+        <div id="cycleDots" class="cycle-dots" aria-hidden="true">
+          <span class="cycle-dot"></span>
+          <span class="cycle-dot"></span>
+          <span class="cycle-dot"></span>
+        </div>
         <p id="timerDisplay" class="timer-display" aria-live="polite">25:00</p>
         <p id="statusText" class="status-text">Press Start Focus to begin your first block.</p>
+        <p id="coachPrompt" class="coach-prompt">
+          Start with a clear verb, then let the timer coach your breaks without turning the day into a streak.
+        </p>
+        <button id="copyCoachPromptBtn" class="btn btn-ghost btn-small" hidden>Copy AI Check-In Prompt</button>
         <p id="intentionPreview" class="intention-preview">No intention set yet.</p>
       </section>
 
       <section class="actions panel">
-        <button id="enableAudioBtn" class="btn btn-primary">Tap To Enable Audio</button>
+        <button id="enableAudioBtn" class="btn btn-primary">Enable Audio</button>
         <button id="startFocusBtn" class="btn btn-primary">Start Focus</button>
         <button id="startBreakBtn" class="btn btn-primary" hidden>Start Break</button>
-        <button id="startNextFocusBtn" class="btn btn-primary" hidden>Start Next Focus</button>
-        <button id="transitionEarlyBtn" class="btn btn-ghost" hidden>Transition To End Cue</button>
+        <button id="startNextFocusBtn" class="btn btn-primary" hidden>Start Next Block</button>
+        <button id="transitionEarlyBtn" class="btn btn-ghost" hidden>Wrap This Block</button>
         <button id="resetBtn" class="btn btn-ghost">Reset</button>
       </section>
 
@@ -118,13 +133,13 @@
           </div>
 
           <p class="advanced-note">
-            Use Transition To End Cue during focus or break if you want to move into the final transition sooner.
+            Use Wrap This Block during focus or break if you want to move into the final transition sooner.
           </p>
         </details>
       </section>
 
       <footer class="app-footer">
-        <small id="appVersion">v1.1.0</small>
+        <small id="appVersion">v1.2.0</small>
       </footer>
     </main>
 
