@@ -1,0 +1,13 @@
+{
+  "name": "focus-timer",
+  "version": "1.2.0",
+  "private": true,
+  "scripts": {
+    "serve": "node scripts/serve.js",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}

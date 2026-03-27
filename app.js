@@ -1,16 +1,22 @@
 const APP_VERSION = "v1.2.0";
+const RUNTIME_CONFIG = window.__FOCUS_TIMER_CONFIG__ || {};
+
+function getPositiveNumber(value, fallback) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
 const RHYTHM = Object.freeze({
-  focusSeconds: 25 * 60,
-  shortBreakSeconds: 5 * 60,
-  longBreakSeconds: 15 * 60,
-  longBreakInterval: 3,
-  restoreWindowMs: 2 * 60 * 60 * 1000,
+  focusSeconds: getPositiveNumber(RUNTIME_CONFIG.focusSeconds, 25 * 60),
+  shortBreakSeconds: getPositiveNumber(RUNTIME_CONFIG.shortBreakSeconds, 5 * 60),
+  longBreakSeconds: getPositiveNumber(RUNTIME_CONFIG.longBreakSeconds, 15 * 60),
+  longBreakInterval: Math.max(1, Math.round(getPositiveNumber(RUNTIME_CONFIG.longBreakInterval, 3))),
+  restoreWindowMs: getPositiveNumber(RUNTIME_CONFIG.restoreWindowMs, 2 * 60 * 60 * 1000),
 });
 const FOCUS_SECONDS = RHYTHM.focusSeconds;
 const SHORT_BREAK_SECONDS = RHYTHM.shortBreakSeconds;
 const LONG_BREAK_SECONDS = RHYTHM.longBreakSeconds;
-const FOCUS_ALARM_FADE_SECONDS = 20;
-const BREAK_RETURN_FADE_SECONDS = 60;
+const FOCUS_ALARM_FADE_SECONDS = getPositiveNumber(RUNTIME_CONFIG.focusAlarmFadeSeconds, 20);
+const BREAK_RETURN_FADE_SECONDS = getPositiveNumber(RUNTIME_CONFIG.breakReturnFadeSeconds, 60);
 const STORAGE_KEY = "focus-timer-session-v1";
 
 const BreakKind = Object.freeze({
@@ -708,9 +714,9 @@ function getBreakSeconds(kind = currentBreakKind) {
   return kind === BreakKind.LONG ? LONG_BREAK_SECONDS : SHORT_BREAK_SECONDS;
 }
 
-function getBreakFloorLabel(kind = currentBreakKind) {
+function getBreakDurationLabel(kind = currentBreakKind) {
   const minutes = Math.round(getBreakSeconds(kind) / 60);
-  return kind === BreakKind.LONG ? `${minutes}+ min reset` : `${minutes} min reset`;
+  return kind === BreakKind.LONG ? `${minutes}+ min` : `${minutes} min`;
 }
 
 function getUpcomingBreakKind() {
@@ -876,14 +882,17 @@ function updateCoachPanel() {
       ui.rhythmLabel.textContent =
         currentBreakKind === BreakKind.LONG ? "Long break floor reached" : "Break floor reached";
     } else {
-      ui.rhythmLabel.textContent = `${getBreakFloorLabel(currentBreakKind)} floor`;
+      ui.rhythmLabel.textContent =
+        currentBreakKind === BreakKind.LONG
+          ? `Long break ${getBreakDurationLabel(currentBreakKind)} floor`
+          : `Break ${getBreakDurationLabel(currentBreakKind)} floor`;
     }
   } else {
     ui.cycleLabel.textContent = `Block ${getNextBlockNumber()} of ${RHYTHM.longBreakInterval}`;
     ui.rhythmLabel.textContent =
       upcomingBreakKind === BreakKind.LONG
-        ? `Next long break ${Math.round(LONG_BREAK_SECONDS / 60)}+ min`
-        : `Next break ${Math.round(SHORT_BREAK_SECONDS / 60)} min`;
+        ? `Next long break ${getBreakDurationLabel(BreakKind.LONG)}`
+        : `Next break ${getBreakDurationLabel(BreakKind.SHORT)}`;
   }
 
   ui.coachPrompt.textContent = buildCoachPromptText();
